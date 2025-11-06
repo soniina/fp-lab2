@@ -1,0 +1,49 @@
+name: Haskell Lab 2 CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Stack
+        uses: haskell-actions/setup@v2
+        with:
+          enable-stack: true
+
+      - name: Cache stack and tools
+        uses: actions/cache@v3
+        env:
+          cache-name: cache-stack
+        with:
+          path: |
+            ~/.stack
+            ~/.local/bin
+            .stack-work
+          key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('**/stack.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.cache-name }}-
+
+      - name: Install GHC 
+        run: stack setup
+
+      - name: Install tools 
+        run: |
+          command -v ormolu >/dev/null 2>&1 || stack install --fast ormolu
+          command -v hlint >/dev/null 2>&1 || stack install --fast hlint
+
+      - name: Check formatting
+        run: stack exec ormolu -- --mode check $(find src test -name "*.hs")
+
+      - name: Run HLint
+        run: stack exec hlint -- .
+
+      - name: Build
+        run: stack build --pedantic --test --no-run-tests
+
+      - name: Run tests
+        run: stack test
