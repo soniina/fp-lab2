@@ -22,17 +22,6 @@ ghc-options:
 library:
   source-dirs: src
 
-executables:
-  fp-lab2-exe:
-    main:                Main.hs
-    source-dirs:         app
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - fp-lab2
-
 tests:
   fp-lab2-test:
     main:                Spec.hs
@@ -45,3 +34,4 @@ tests:
     - fp-lab2
     - tasty
     - tasty-hunit
+    - tasty-quickcheck
