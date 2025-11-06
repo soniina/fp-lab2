@@ -315,7 +315,7 @@ foldrRB f acc (Node _ x count left right) = foldrRB f accNode left
     accNode = iterate (f x) accRight !! count
     accRight = foldrRB f acc right
 ```
-Левая свёртка дерева — обходит его в порядке убывания.
+Правая свёртка дерева — обходит его в порядке убывания.
 Для каждого элемента применяет функцию f, обновляя аккумулятор.
 Учитывает кратность элементов (count) через повторное применение функции.
 
