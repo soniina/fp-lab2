@@ -13,7 +13,9 @@ tests :: TestTree
 tests =
   testGroup
     "RBMultiset Tests"
-    [unitTests]
+    [ unitTests,
+      propertyTests
+    ]
 
 unitTests :: TestTree
 unitTests =
@@ -39,4 +41,21 @@ unitTests =
         fromList [10, 5, 15, 3, 7, 3 :: Int] @=? fromList [5, 3, 7, 10, 15, 3],
       testCase "Eq: different multisets" $
         False @=? (fromList [1, 2 :: Int] == fromList [1, 1])
+    ]
+
+propertyTests :: TestTree
+propertyTests =
+  testGroup
+    "Property-based Tests"
+    [ QC.testProperty "Monoid: left identity" $
+        \(xs :: [Int]) -> mempty <> fromList xs == (fromList xs :: RBNode Int),
+      QC.testProperty "Monoid: right identity" $
+        \(xs :: [Int]) -> fromList xs <> mempty == (fromList xs :: RBNode Int),
+      QC.testProperty "Monoid: associativity" $
+        \(xs :: [Int]) (ys :: [Int]) (zs :: [Int]) ->
+          let a = fromList xs; b = fromList ys; c = fromList zs
+           in (a <> b) <> c == (a <> (b <> c) :: RBNode Int),
+      QC.testProperty "Eq consistent with sorted list equality" $
+        \(xs :: [Int]) (ys :: [Int]) ->
+          (fromList xs == fromList ys) === (sort xs == sort ys)
     ]
