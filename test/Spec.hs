@@ -1,5 +1,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
+{-# HLINT ignore "Monoid law, left identity" #-}
+{-# HLINT ignore "Monoid law, right identity" #-}
+
 import Data.List (sort)
 import RBMultiset
 import Test.Tasty
