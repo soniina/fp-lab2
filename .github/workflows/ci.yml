@@ -15,6 +15,14 @@ jobs:
         with:
           enable-stack: true
 
+      - name: Install GHC 
+        run: stack setup
+
+      - name: Install tools 
+        run: |
+          command -v ormolu >/dev/null 2>&1 || stack install --fast ormolu
+          command -v hlint >/dev/null 2>&1 || stack install --fast hlint
+
       - name: Cache stack and tools
         uses: actions/cache@v3
         env:
@@ -27,14 +35,6 @@ jobs:
           key: ${{ runner.os }}-${{ env.cache-name }}-${{ hashFiles('**/stack.yaml') }}
           restore-keys: |
             ${{ runner.os }}-${{ env.cache-name }}-
-
-      - name: Install GHC 
-        run: stack setup
-
-      - name: Install tools 
-        run: |
-          command -v ormolu >/dev/null 2>&1 || stack install --fast ormolu
-          command -v hlint >/dev/null 2>&1 || stack install --fast hlint
 
       - name: Check formatting
         run: stack exec ormolu -- --mode check $(find src test -name "*.hs")

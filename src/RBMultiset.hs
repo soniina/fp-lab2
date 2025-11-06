@@ -92,29 +92,29 @@ deleteRB x tree = makeBlack (del tree)
 
     recolor :: RBNode a -> Color -> RBNode a
     recolor Nil _ = Nil
-    recolor (Node _ x count left right) color = Node color x count left right
+    recolor (Node _ y count left right) color = Node color y count left right
 
     deleteMin :: RBNode a -> (a, Int, RBNode a)
-    deleteMin (Node color x count Nil right) = (x, count, recolor right color)
-    deleteMin (Node color x count left right) =
+    deleteMin (Node color y count Nil right) = (y, count, recolor right color)
+    deleteMin (Node color y count left right) =
       let (minVal, minCount, newLeft) = deleteMin left
-       in (minVal, minCount, Node color x count newLeft right)
+       in (minVal, minCount, Node color y count newLeft right)
     deleteMin Nil = error "deleteMin on empty tree"
 
     fixDoubleBlackL :: RBNode a -> RBNode a
-    fixDoubleBlackL (Node c gv gc (Node Red pv pc pl pr) gr) =
+    fixDoubleBlackL (Node _ gv gc (Node Red pv pc pl pr) gr) =
       balanceDelL (Node Black pv pc (Node Red gv gc Nil pl) pr) gr
-    fixDoubleBlackL (Node c gv gc (Node Black pv pc pl pr) gr)
+    fixDoubleBlackL (Node _ gv gc (Node Black pv pc pl pr) gr)
       | isBlack pl && isBlack pr =
           Node Black gv gc (Node Red pv pc pl pr) gr
-    fixDoubleBlackL (Node c gv gc (Node Black pv pc (Node Red cv cc cl cr) pr) gr) =
+    fixDoubleBlackL (Node _ gv gc (Node Black pv pc (Node Red cv cc cl cr) pr) _) =
       Node
         Black
         cv
         cc
         (Node Black gv gc Nil cl)
         (Node Black pv pc cr pr)
-    fixDoubleBlackL (Node c gv gc (Node Black pv pc pl (Node Red cv cc cl cr)) gr) =
+    fixDoubleBlackL (Node _ gv gc (Node Black pv pc pl (Node Red cv cc cl cr)) _) =
       Node
         Black
         pv
@@ -124,19 +124,19 @@ deleteRB x tree = makeBlack (del tree)
     fixDoubleBlackL t = recolor t Black
 
     fixDoubleBlackR :: RBNode a -> RBNode a
-    fixDoubleBlackR (Node c gv gc gl (Node Red pv pc pl pr)) =
+    fixDoubleBlackR (Node _ gv gc gl (Node Red pv pc pl pr)) =
       balanceDelR (Node Black pv pc pl (Node Red gv gc pr Nil)) gl
-    fixDoubleBlackR (Node c gv gc gl (Node Black pv pc pl pr))
+    fixDoubleBlackR (Node _ gv gc gl (Node Black pv pc pl pr))
       | isBlack pl && isBlack pr =
           Node Black gv gc gl (Node Red pv pc pl pr)
-    fixDoubleBlackR (Node c gv gc gl (Node Black pv pc pl (Node Red cv cc cl cr))) =
+    fixDoubleBlackR (Node _ gv gc _ (Node Black pv pc pl (Node Red cv cc cl cr))) =
       Node
         Black
         cv
         cc
         (Node Black pv pc pl cl)
         (Node Black gv gc cr Nil)
-    fixDoubleBlackR (Node c gv gc gl (Node Black pv pc (Node Red cv cc cl cr) pr)) =
+    fixDoubleBlackR (Node _ gv gc _ (Node Black pv pc (Node Red cv cc cl cr) pr)) =
       Node
         Black
         pv
