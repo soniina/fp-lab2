@@ -18,7 +18,6 @@ ghc-options:
 - -Wmissing-home-modules
 - -Wpartial-fields
 - -Wredundant-constraints
-- -Wno-unrecognised-pragmas
 
 
 library:
