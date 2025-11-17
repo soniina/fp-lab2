@@ -1,14 +1,23 @@
-module RBMultiset (RBNode, insertRB, deleteRB, filterRB, mapRB, foldlRB, foldrRB, toList, fromList) where
+{-# OPTIONS_GHC -Wno-partial-fields #-}
 
-data Color = Red | Black deriving (Show, Eq)
+module RBMultiSet (RBMultiSet (..), validRBTree, getRBNode) where
 
-data RBNode a
-  = Nil
-  | Node Color a Int (RBNode a) (RBNode a)
-  deriving (Show)
+import Data.Maybe (isJust)
+import MultiSet (MultiSet (..))
 
-instance (Ord a) => Eq (RBNode a) where
-  (==) tree1 tree2 = areEqual (pushLefts tree1 []) (pushLefts tree2 [])
+newtype RBMultiSet a = RBMultiSet (RBNode a) deriving (Show)
+
+instance MultiSet RBMultiSet where
+  empty = mempty
+  insert x (RBMultiSet tree) = RBMultiSet (insertRB x tree)
+  delete x (RBMultiSet tree) = RBMultiSet (deleteRB x tree)
+  map f (RBMultiSet tree) = RBMultiSet (fmap f tree)
+  filter p (RBMultiSet tree) = RBMultiSet (filterRB p tree)
+  toList (RBMultiSet tree) = toListRB tree
+  fromList xs = RBMultiSet (fromListRB xs)
+
+instance (Ord a) => Eq (RBMultiSet a) where
+  (==) (RBMultiSet tree1) (RBMultiSet tree2) = areEqual (pushLefts tree1 []) (pushLefts tree2 [])
     where
       areEqual nodes1 nodes2 =
         case (nextElem nodes1, nextElem nodes2) of
@@ -20,181 +29,174 @@ instance (Ord a) => Eq (RBNode a) where
 
       pushLefts :: RBNode a -> [RBNode a] -> [RBNode a]
       pushLefts Nil nodes = nodes
-      pushLefts node@(Node _ _ _ left _) nodes = pushLefts left (node : nodes)
+      pushLefts node@(Node {left = l}) nodes = pushLefts l (node : nodes)
 
       nextElem :: [RBNode a] -> Maybe ((a, Int), [RBNode a])
       nextElem [] = Nothing
-      nextElem (Node _ x count _ right : nodes) = Just ((x, count), pushLefts right nodes)
+      nextElem (Node {value = x, count = n, right = r} : nodes) = Just ((x, n), pushLefts r nodes)
       nextElem (Nil : _) = error "unexpected Nil in nodes"
 
-instance (Ord a) => Semigroup (RBNode a) where
-  a <> b = fromList (toList a ++ toList b)
+instance (Ord a) => Semigroup (RBMultiSet a) where
+  (RBMultiSet a) <> (RBMultiSet b) = RBMultiSet (unionRB a b)
 
-instance (Ord a) => Monoid (RBNode a) where
-  mempty = Nil
+instance (Ord a) => Monoid (RBMultiSet a) where
+  mempty = RBMultiSet Nil
+
+instance Foldable RBMultiSet where
+  foldMap f (RBMultiSet node) = foldMap f node
+
+data Color = Red | Black deriving (Show, Eq)
+
+data RBNode a
+  = Nil
+  | Node
+      { color :: Color,
+        value :: a,
+        count :: Int,
+        left :: RBNode a,
+        right :: RBNode a
+      }
+  deriving (Show)
+
+instance Functor RBNode where
+  fmap _ Nil = Nil
+  fmap f node@(Node {value = x, left = l, right = r}) = node {value = f x, left = fmap f l, right = fmap f r}
+
+instance Foldable RBNode where
+  foldMap _ Nil = mempty
+  foldMap f (Node {value = x, count = n, left = l, right = r}) = foldMap f l <> mconcat (replicate n (f x)) <> foldMap f r
+
+unionRB :: (Ord a) => RBNode a -> RBNode a -> RBNode a
+unionRB Nil t = t
+unionRB t Nil = t
+unionRB t1 t2 = foldr insertRB t2 (toListRB t1)
 
 insertRB :: (Ord a) => a -> RBNode a -> RBNode a
 insertRB x tree = makeBlack (ins tree)
   where
     ins Nil = Node Red x 1 Nil Nil
-    ins (Node color y count left right)
-      | x < y = balance (Node color y count (ins left) right)
-      | x > y = balance (Node color y count left (ins right))
-      | otherwise = Node color y (count + 1) left right
-    makeBlack (Node _ y count left right) = Node Black y count left right
-    makeBlack Nil = Nil
+    ins node@(Node {value = y, count = n, left = l, right = r})
+      | x < y = balance node {left = ins l}
+      | x > y = balance node {right = ins r}
+      | otherwise = node {count = n + 1}
 
-    balance :: RBNode a -> RBNode a
-    balance (Node Black gv gc (Node Red pv pc (Node Red xv xc xl xr) pr) gr) =
-      Node Red pv pc (Node Black xv xc xl xr) (Node Black gv gc pr gr)
-    balance (Node Black gv gc (Node Red xv xc xl (Node Red pv pc pl pr)) gr) =
-      Node Red pv pc (Node Black xv xc xl pl) (Node Black gv gc pr gr)
-    balance (Node Black gv gc gl (Node Red pv pc pr (Node Red xv xc xl xr))) =
-      Node Red pv pc (Node Black gv gc gl pr) (Node Black xv xc xl xr)
-    balance (Node Black gv gc gl (Node Red xv xc (Node Red pv pc pl pr) xr)) =
-      Node Red pv pc (Node Black gv gc gl pl) (Node Black xv xc pr xr)
-    balance node = node
+    makeBlack Nil = Nil
+    makeBlack node = node {color = Black}
+
+findCountAndReduce :: (Ord a) => a -> RBNode a -> (RBNode a, Bool)
+findCountAndReduce _ Nil = (Nil, False)
+findCountAndReduce x node@(Node {value = y, count = n, left = l, right = r})
+  | x < y =
+      let (newLeft, deleted) = findCountAndReduce x l
+       in (node {left = newLeft}, deleted)
+  | x > y =
+      let (newRight, deleted) = findCountAndReduce x r
+       in (node {right = newRight}, deleted)
+  | n > 1 = (node {count = n - 1}, False)
+  | otherwise = (node, True)
 
 deleteRB :: (Ord a) => a -> RBNode a -> RBNode a
-deleteRB x tree = makeBlack (del tree)
+deleteRB val tree = if deleted then makeBlack $ del val tree else newTree
   where
+    (newTree, deleted) = findCountAndReduce val tree
+
     makeBlack Nil = Nil
-    makeBlack (Node _ y count left right) = Node Black y count left right
+    makeBlack node = node {color = Black}
 
-    del Nil = Nil
-    del node@(Node color y count left right)
-      | x < y = fixL (Node color y count (del left) right)
-      | x > y = fixR (Node color y count left (del right))
-      | count > 1 = Node color x (count - 1) left right
-      | otherwise = removeNode node
+    del :: (Ord a) => a -> RBNode a -> RBNode a
+    del x node@(Node {value = y, left = l, right = r})
+      | x < y = delL x node
+      | x > y = delR x node
+      | otherwise = fuse l r
+    del _ Nil = Nil
 
-    fixL :: RBNode a -> RBNode a
-    fixL (Node color y count Nil right) = fixDoubleBlackL (Node color y count Nil right)
-    fixL (Node color y count left right) = Node color y count left right
-    fixL Nil = Nil
+    delL :: (Ord a) => a -> RBNode a -> RBNode a
+    delL x node@(Node {color = Black, left = l}) = balL $ node {left = del x l}
+    delL x node@(Node {color = Red, left = l}) = node {left = del x l}
+    delL _ Nil = Nil
 
-    fixR :: RBNode a -> RBNode a
-    fixR (Node color y count left Nil) = fixDoubleBlackR (Node color y count left Nil)
-    fixR (Node color y count left right) = Node color y count left right
-    fixR Nil = Nil
+    balL :: RBNode a -> RBNode a
+    balL node@(Node {color = Black, left = childNode@(Node {color = Red})}) = node {color = Red, left = childNode {color = Black}}
+    balL node@(Node {color = Black, right = childNode@(Node {color = Black})}) = balance node {right = childNode {color = Red}}
+    balL (Node Black gv gc gl (Node Red pv pc (Node Black sv sc sl sr) (Node Black cv cc cl cr))) =
+      Node Red sv sc (Node Black gv gc gl sl) (balance (Node Black pv pc sr (Node Red cv cc cl cr)))
+    balL node = node
 
-    removeNode (Node Red _ _ left right) =
-      case (left, right) of
-        (Nil, Nil) -> Nil
-        _ -> fixR $ Node Red newValue newCount left newRight where (newValue, newCount, newRight) = deleteMin right
-    removeNode (Node Black _ _ left right) =
-      case (left, right) of
-        (Nil, Nil) -> Nil
-        (Nil, node) -> recolor node Black
-        (node, Nil) -> recolor node Black
-        _ -> Node Black newValue newCount left newRight where (newValue, newCount, newRight) = deleteMin right
-    removeNode Nil = Nil
+    delR :: (Ord a) => a -> RBNode a -> RBNode a
+    delR x node@(Node {color = Black, right = r}) = balR $ node {right = del x r}
+    delR x node@(Node {color = Red, right = r}) = node {right = del x r}
+    delR _ Nil = Nil
 
-    recolor :: RBNode a -> Color -> RBNode a
-    recolor Nil _ = Nil
-    recolor (Node _ y count left right) color = Node color y count left right
+    balR :: RBNode a -> RBNode a
+    balR node@(Node {color = Black, right = childNode@(Node {color = Red})}) = node {color = Red, right = childNode {color = Black}}
+    balR node@(Node {color = Black, left = childNode@(Node {color = Black})}) = balance node {left = childNode {color = Red}}
+    balR (Node Black gv gc (Node Red pv pc (Node Black cv cc cl cr) (Node Black sv sc sl sr)) gr) =
+      Node Red sv sc (balance (Node Black pv pc (Node Red cv cc cl cr) sl)) (Node Black gv gc sr gr)
+    balR node = node
 
-    deleteMin :: RBNode a -> (a, Int, RBNode a)
-    deleteMin (Node color y count Nil right) = (y, count, recolor right color)
-    deleteMin (Node color y count left right) =
-      let (minVal, minCount, newLeft) = deleteMin left
-       in (minVal, minCount, Node color y count newLeft right)
-    deleteMin Nil = error "deleteMin on empty tree"
+    fuse :: RBNode a -> RBNode a -> RBNode a
+    fuse Nil r = r
+    fuse l Nil = l
+    fuse tree1@(Node {color = Black}) tree2@(Node {color = Red, left = l2}) = tree2 {left = fuse tree1 l2}
+    fuse tree1@(Node {color = Red, right = r1}) tree2@(Node {color = Black}) = tree1 {right = fuse r1 tree2}
+    fuse tree1@(Node {color = Red, right = r1}) tree2@(Node {color = Red, left = l2}) =
+      let s = fuse r1 l2
+       in case s of
+            node@(Node {color = Red, left = sl, right = sr}) -> node {left = tree1 {right = sl}, right = tree2 {left = sr}}
+            _ -> tree1 {right = tree2 {left = s}}
+    fuse tree1@(Node {color = Black, right = r1}) tree2@(Node {color = Black, left = l2}) =
+      let s = fuse r1 l2
+       in case s of
+            node@(Node {color = Red, left = sl, right = sr}) -> node {left = tree1 {right = sl}, right = tree2 {left = sr}}
+            _ -> balL (tree1 {right = tree2 {left = s}})
 
-    fixDoubleBlackL :: RBNode a -> RBNode a
-    fixDoubleBlackL (Node _ gv gc (Node Red pv pc pl pr) gr) =
-      balanceDelL (Node Black pv pc (Node Red gv gc Nil pl) pr) gr
-    fixDoubleBlackL (Node _ gv gc (Node Black pv pc pl pr) gr)
-      | isBlack pl && isBlack pr =
-          Node Black gv gc (Node Red pv pc pl pr) gr
-    fixDoubleBlackL (Node _ gv gc (Node Black pv pc (Node Red cv cc cl cr) pr) _) =
-      Node
-        Black
-        cv
-        cc
-        (Node Black gv gc Nil cl)
-        (Node Black pv pc cr pr)
-    fixDoubleBlackL (Node _ gv gc (Node Black pv pc pl (Node Red cv cc cl cr)) _) =
-      Node
-        Black
-        pv
-        pc
-        (Node Black gv gc Nil pl)
-        (Node Red cv cc cl cr)
-    fixDoubleBlackL t = recolor t Black
+balance :: RBNode a -> RBNode a
+balance (Node Black gv gc (Node Red pv pc (Node Red xv xc xl xr) pr) gr) =
+  Node Red pv pc (Node Black xv xc xl xr) (Node Black gv gc pr gr)
+balance (Node Black gv gc (Node Red xv xc xl (Node Red pv pc pl pr)) gr) =
+  Node Red pv pc (Node Black xv xc xl pl) (Node Black gv gc pr gr)
+balance (Node Black gv gc gl (Node Red pv pc pr (Node Red xv xc xl xr))) =
+  Node Red pv pc (Node Black gv gc gl pr) (Node Black xv xc xl xr)
+balance (Node Black gv gc gl (Node Red xv xc (Node Red pv pc pl pr) xr)) =
+  Node Red pv pc (Node Black gv gc gl pl) (Node Black xv xc pr xr)
+balance node = node
 
-    fixDoubleBlackR :: RBNode a -> RBNode a
-    fixDoubleBlackR (Node _ gv gc gl (Node Red pv pc pl pr)) =
-      balanceDelR (Node Black pv pc pl (Node Red gv gc pr Nil)) gl
-    fixDoubleBlackR (Node _ gv gc gl (Node Black pv pc pl pr))
-      | isBlack pl && isBlack pr =
-          Node Black gv gc gl (Node Red pv pc pl pr)
-    fixDoubleBlackR (Node _ gv gc _ (Node Black pv pc pl (Node Red cv cc cl cr))) =
-      Node
-        Black
-        cv
-        cc
-        (Node Black pv pc pl cl)
-        (Node Black gv gc cr Nil)
-    fixDoubleBlackR (Node _ gv gc _ (Node Black pv pc (Node Red cv cc cl cr) pr)) =
-      Node
-        Black
-        pv
-        pc
-        (Node Red cv cc cl cr)
-        (Node Black gv gc pr Nil)
-    fixDoubleBlackR t = recolor t Black
+toListRB :: RBNode a -> [a]
+toListRB Nil = []
+toListRB (Node {value = x, count = n, left = l, right = r}) = toListRB l ++ replicate n x ++ toListRB r
 
-    balanceDelL :: RBNode a -> RBNode a -> RBNode a
-    balanceDelL (Node Black gv gc (Node Red pv pc (Node Red cv cc cl cr) s) gr) _ =
-      Node Red pv pc (Node Black cv cc cl cr) (Node Black gv gc s gr)
-    balanceDelL (Node Black gv gc (Node Red pv pc cl (Node Red cv cc cr s)) gr) _ =
-      Node Red cv cc (Node Black pv pc cl cr) (Node Black gv gc s gr)
-    balanceDelL node _ = node
-
-    balanceDelR :: RBNode a -> RBNode a -> RBNode a
-    balanceDelR (Node Black gv gc gl (Node Red pv pc s (Node Red cv cc cr gr))) _ =
-      Node Red pv pc (Node Black gv gc gl s) (Node Black cv cc cr gr)
-    balanceDelR (Node Black gv gc gl (Node Red pv pc (Node Red cv cc s cr) gr)) _ =
-      Node Red cv cc (Node Black gv gc gl s) (Node Black pv pc cr gr)
-    balanceDelR node _ = node
-
-    isBlack :: RBNode a -> Bool
-    isBlack Nil = True
-    isBlack (Node Black _ _ _ _) = True
-    isBlack _ = False
-
-toList :: RBNode a -> [a]
-toList Nil = []
-toList (Node _ x count left right) = toList left ++ replicate count x ++ toList right
-
-fromList :: (Ord a) => [a] -> RBNode a
-fromList = foldr insertRB Nil
+fromListRB :: (Ord a) => [a] -> RBNode a
+fromListRB = foldr insertRB Nil
 
 filterRB :: (Ord a) => (a -> Bool) -> RBNode a -> RBNode a
 filterRB _ Nil = Nil
-filterRB p (Node color x count left right) = if p x then Node color x count newLeft newRight else newLeft <> newRight
-  where
-    newLeft = filterRB p left
-    newRight = filterRB p right
+filterRB p tree = fromListRB (Prelude.filter p (toListRB tree))
 
-mapRB :: (Ord a, Ord b) => (a -> b) -> RBNode a -> RBNode b
-mapRB _ Nil = Nil
-mapRB p (Node color x count left right) = Node color (p x) count newLeft newRight
-  where
-    newLeft = mapRB p left
-    newRight = mapRB p right
+getRBNode :: RBMultiSet a -> RBNode a
+getRBNode (RBMultiSet node) = node
 
-foldlRB :: (a -> b -> a) -> a -> RBNode b -> a
-foldlRB _ acc Nil = acc
-foldlRB f acc (Node _ x count left right) = foldlRB f accNode right
-  where
-    accNode = iterate (`f` x) accLeft !! count
-    accLeft = foldlRB f acc left
+blackPathCount :: RBNode a -> Maybe Int
+blackPathCount Nil = Just 1
+blackPathCount (Node {color = c, left = l, right = r}) = do
+  leftCount <- blackPathCount l
+  rightCount <- blackPathCount r
+  if leftCount /= rightCount
+    then Nothing
+    else Just (leftCount + if c == Black then 1 else 0)
 
-foldrRB :: (a -> b -> b) -> b -> RBNode a -> b
-foldrRB _ acc Nil = acc
-foldrRB f acc (Node _ x count left right) = foldrRB f accNode left
+noRedChildrenForRed :: RBNode a -> Bool
+noRedChildrenForRed Nil = True
+noRedChildrenForRed node@Node {left = l, right = r} = not (isRed node && (isRed l || isRed r)) && noRedChildrenForRed l && noRedChildrenForRed r
+
+isRed :: RBNode a -> Bool
+isRed Node {color = Red} = True
+isRed _ = False
+
+rootBlack :: RBNode a -> Bool
+rootBlack (Node {color = Red}) = False
+rootBlack _ = True
+
+validRBTree :: RBMultiSet a -> Bool
+validRBTree multiset = rootBlack tree && noRedChildrenForRed tree && isJust (blackPathCount tree)
   where
-    accNode = iterate (f x) accRight !! count
-    accRight = foldrRB f acc right
+    tree = getRBNode multiset
