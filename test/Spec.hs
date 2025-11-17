@@ -4,10 +4,12 @@
 {- HLINT ignore "Monoid law, right identity" -}
 
 import Data.List (sort)
-import RBMultiset
+import MultiSet
+import RBMultiSet
 import Test.Tasty
 import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck as QC
+import Prelude hiding (filter, map)
 
 main :: IO ()
 main = defaultMain tests
@@ -25,25 +27,29 @@ unitTests =
   testGroup
     "Unit Tests"
     [ testCase "mempty tree toList is []" $
-        toList (mempty :: RBNode Int) @?= [],
+        toList (mempty :: RBMultiSet Int) @?= [],
+      testCase "union (<>) combines elements" $
+        toList ((fromList [1, 2, 3] :: RBMultiSet Int) <> (fromList [4, 5, 3] :: RBMultiSet Int)) @?= [1, 2, 3, 3, 4, 5],
       testCase "insertRB and fromList" $
-        toList (fromList [3, 1, 2, 1 :: Int]) @?= [1, 1, 2, 3],
+        toList (fromList [3, 1, 2, 1] :: RBMultiSet Int) @?= [1, 1, 2, 3],
       testCase "deleteRB removes one occurrence" $
-        toList (deleteRB 2 (fromList [3, 1, 2, 1, 1 :: Int])) @?= [1, 1, 1, 3],
+        toList (delete 2 (fromList [3, 1, 2, 1, 1] :: RBMultiSet Int)) @?= [1, 1, 1, 3],
       testCase "deleteRB removes multiple occurrences" $
-        toList (deleteRB 1 (fromList [3, 1, 2, 1, 1 :: Int])) @?= [1, 1, 2, 3],
+        toList (delete 1 (fromList [3, 1, 2, 1, 1] :: RBMultiSet Int)) @?= [1, 1, 2, 3],
+      testCase "deleteRB removes zero occurrences" $
+        toList (delete 4 (fromList [3, 1, 2, 1, 1] :: RBMultiSet Int)) @?= [1, 1, 1, 2, 3],
       testCase "filterRB keeps even elements" $
-        toList (filterRB even (fromList [1, 2, 3, 4, 5 :: Int])) @?= [2, 4],
+        toList (filter even (fromList [1, 2, 3, 4, 5] :: RBMultiSet Int)) @?= [2, 4],
       testCase "mapRB doubles elements" $
-        toList (mapRB (* 2) (fromList [1, 2, 3 :: Int])) @?= [2, 4, 6],
+        toList (map (* 2) (fromList [1, 2, 3] :: RBMultiSet Int)) @?= [2, 4, 6],
       testCase "foldlRB divides elements" $
-        foldlRB div 16 (fromList [1, 2, 4 :: Int]) @?= 2,
+        foldl div 16 (fromList [1, 2, 4] :: RBMultiSet Int) @?= 2,
       testCase "foldrRB sums elements" $
-        foldrRB (+) 0 (fromList [1, 2, 3, 4 :: Int]) @?= 10,
+        foldr (+) 1 (fromList [1, 2, 3, 4] :: RBMultiSet Int) @?= 11,
       testCase "Eq: same multiset (different order)" $
-        fromList [10, 5, 15, 3, 7, 3 :: Int] @=? fromList [5, 3, 7, 10, 15, 3],
+        (fromList [10, 5, 15, 3, 7, 3] :: RBMultiSet Int) @=? fromList [5, 3, 7, 10, 15, 3],
       testCase "Eq: different multisets" $
-        False @=? (fromList [1, 2 :: Int] == fromList [1, 1])
+        False @=? ((fromList [1, 2] :: RBMultiSet Int) == fromList [1, 1])
     ]
 
 propertyTests :: TestTree
@@ -51,14 +57,21 @@ propertyTests =
   testGroup
     "Property-based Tests"
     [ QC.testProperty "Monoid: left identity" $
-        \(xs :: [Int]) -> mempty <> fromList xs == (fromList xs :: RBNode Int),
+        \(xs :: [Int]) -> mempty <> fromList xs == (fromList xs :: RBMultiSet Int),
       QC.testProperty "Monoid: right identity" $
-        \(xs :: [Int]) -> fromList xs <> mempty == (fromList xs :: RBNode Int),
+        \(xs :: [Int]) -> fromList xs <> mempty == (fromList xs :: RBMultiSet Int),
       QC.testProperty "Monoid: associativity" $
         \(xs :: [Int]) (ys :: [Int]) (zs :: [Int]) ->
           let a = fromList xs; b = fromList ys; c = fromList zs
-           in (a <> b) <> c == (a <> (b <> c) :: RBNode Int),
+           in (a <> b) <> c == (a <> (b <> c) :: RBMultiSet Int),
       QC.testProperty "Eq consistent with sorted list equality" $
         \(xs :: [Int]) (ys :: [Int]) ->
-          (fromList xs == fromList ys) === (sort xs == sort ys)
+          ((fromList xs :: RBMultiSet Int) == fromList ys) === (sort xs == sort ys),
+      QC.testProperty "RBTree: valid after fromList" $
+        \(xs :: [Int]) -> validRBTree (fromList xs :: RBMultiSet Int),
+      QC.testProperty "RBTree: valid after filter" $
+        \(xs :: [Int]) ->
+          let ms0 = fromList xs :: RBMultiSet Int
+              ms1 = filter even ms0
+           in validRBTree ms0 && validRBTree ms1
     ]
