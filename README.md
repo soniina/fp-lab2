@@ -4,7 +4,6 @@
 
 **Вариант**: rb-bag
 
-
 ## Задание
 
 В рамках лабораторной работы вам предлагается реализовать одну из предложенных классических структур данных (список, дерево, бинарное дерево, hashmap, граф...).
@@ -27,27 +26,67 @@
 
 ## Реализация
 
-### Основные типы
+### Интерфейс MultiSet
+
+Для унификации работы с мультимножеством был определен класс типов:
+
+```haskell
+class (Foldable bag) => MultiSet bag where
+  empty :: (Ord a) => bag a
+  insert :: (Ord a) => a -> bag a -> bag a
+  delete :: (Ord a) => a -> bag a -> bag a
+  map :: (Ord b) => (a -> b) -> bag a -> bag b
+  filter :: (Ord a) => (a -> Bool) -> bag a -> bag a
+  toList :: bag a -> [a]
+  fromList :: (Ord a) => [a] -> bag a
+```
+
+### Типы данных
+
+Основная структура данных реализована с использованием **Record Syntax**.
 
 ```haskell
 data Color = Red | Black deriving (Show, Eq)
 
 data RBNode a
   = Nil
-  | Node Color a Int (RBNode a) (RBNode a)
+  | Node
+      { color :: Color,
+        value :: a,
+        count :: Int,      -- Количество вхождений элемента
+        left :: RBNode a,
+        right :: RBNode a
+      }
   deriving (Show)
+
+newtype RBMultiSet a = RBMultiSet (RBNode a) deriving (Show)
 ```
 
- `Color` — цвет узла.<br>
- `RBNode a` — узел дерева: значение, количество повторений, левое и правое поддеревья.<br>
- `Nil` - пустое дерево.
+`RBMultiSet` является оберткой (`newtype`) над `RBNode`, скрывая детали реализации дерева от пользователя.
 
- ### Реализованные экземпляры классов типов
+### Экземпляры классов типов
 
-`Eq (RBNode a)`
-``` haskell
-instance (Ord a) => Eq (RBNode a) where
-  (==) tree1 tree2 = areEqual (pushLefts tree1 []) (pushLefts tree2 [])
+**`MultiSet`**<br>
+Реализация основного интерфейса делегирует вызовы внутренним функциям модуля `RBMultiSet`.
+
+```haskell
+instance MultiSet RBMultiSet where
+  empty = mempty
+  insert x (RBMultiSet tree) = RBMultiSet (insertRB x tree)
+  delete x (RBMultiSet tree) = RBMultiSet (deleteRB x tree)
+  map f (RBMultiSet tree) = RBMultiSet (fmap f tree)
+  filter p (RBMultiSet tree) = RBMultiSet (filterRB p tree)
+  toList (RBMultiSet tree) = toListRB tree
+  fromList xs = RBMultiSet (fromListRB xs)
+```
+
+**`Eq`**<br>
+Собственная реализация сравнения деревьев без преобразования их в списки.
+Используется итеративный обход: функция pushLefts проходит по левым узлам, а nextElem достаёт следующий элемент.
+
+```haskell
+instance (Ord a) => Eq (RBMultiSet a) where
+  (==) (RBMultiSet tree1) (RBMultiSet tree2) = areEqual (pushLefts tree1 []) (pushLefts tree2 [])
     where
       areEqual nodes1 nodes2 =
         case (nextElem nodes1, nextElem nodes2) of
@@ -59,51 +98,64 @@ instance (Ord a) => Eq (RBNode a) where
 
       pushLefts :: RBNode a -> [RBNode a] -> [RBNode a]
       pushLefts Nil nodes = nodes
-      pushLefts node@(Node _ _ _ left _) nodes = pushLefts left (node : nodes)
+      pushLefts node@(Node {left = l}) nodes = pushLefts l (node : nodes)
 
       nextElem :: [RBNode a] -> Maybe ((a, Int), [RBNode a])
       nextElem [] = Nothing
-      nextElem (Node _ x count _ right : nodes) = Just ((x, count), pushLefts right nodes)
+      nextElem (Node {value = x, count = n, right = r} : nodes) = Just ((x, n), pushLefts r nodes)
       nextElem (Nil : _) = error "unexpected Nil in nodes"
 ```
-Собственная реализация сравнения деревьев без преобразования их в списки.
-Используется итеративный обход: функция pushLefts проходит по левым узлам, а nextElem достаёт следующий элемент.
 
-<br>
+**`Semigroup` и `Monoid`**<br>
+Реализуют объединение двух мультимножеств и нейтральный элемент (пустое дерево).
 
-`Semigroup (RBNode a)`
 ```haskell
-instance (Ord a) => Semigroup (RBNode a) where
-  a <> b = fromList (toList a ++ toList b)
-```
-Операция объединения (<>) определена через конкатенацию списков элементов обоих деревьев с последующим построением нового сбалансированного дерева.
+instance (Ord a) => Semigroup (RBMultiSet a) where
+  (RBMultiSet a) <> (RBMultiSet b) = RBMultiSet (unionRB a b)
 
-<br>
-
-`Monoid (RBNode a)`
-```haskell
-instance (Ord a) => Monoid (RBNode a) where
-  mempty = Nil
+instance (Ord a) => Monoid (RBMultiSet a) where
+  mempty = RBMultiSet Nil
 ```
 
-mempty задаёт нейтральный элемент для операции объединения — пустое дерево (Nil).<br>
-Совместно с Semigroup это формирует корректную моноидную структуру для мультимножества.
+**`Foldable`**<br>
+Так как класс типов `MultiSet` требует наличие экземпляра `Foldable`, он был реализован для типа-обертки `RBMultiSet`.
+Реализация делегирует работу внутреннему типу `RBNode`, который определяет непосредственную логику обхода дерева с учетом кратности элементов.
+
+```haskell
+instance Foldable RBMultiSet where
+  foldMap f (RBMultiSet node) = foldMap f node
 
 
-### Основные функции
+instance Foldable RBNode where
+  foldMap _ Nil = mempty
+  foldMap f (Node {value = x, count = n, left = l, right = r}) = 
+    foldMap f l <> mconcat (replicate n (f x)) <> foldMap f r
+```
 
-`insertRB x`
+**`Functor`**<br>
+Реализован для `RBNode` для поддержки `fmap` внутри реализации `map` для `MultiSet`.
+
+```haskell
+instance Functor RBNode where
+  fmap _ Nil = Nil
+  fmap f node@(Node {value = x, left = l, right = r}) = 
+    node {value = f x, left = fmap f l, right = fmap f r}
+```
+
+### Основные алгоритмы
+
+**Вставка (`insertRB`)**<br>
+Использует стандартный алгоритм вставки в красно-черное дерево с последующей балансировкой. Если элемент уже существует, увеличивается счетчик `count`.
+
 ```haskell
 insertRB :: (Ord a) => a -> RBNode a -> RBNode a
 insertRB x tree = makeBlack (ins tree)
   where
     ins Nil = Node Red x 1 Nil Nil
-    ins (Node color y count left right)
-      | x < y = balance (Node color y count (ins left) right)
-      | x > y = balance (Node color y count left (ins right))
-      | otherwise = Node color y (count + 1) left right
-    makeBlack (Node _ y count left right) = Node Black y count left right
-    makeBlack Nil = Nil
+    ins node@(Node {value = y, count = n, left = l, right = r})
+      | x < y = balance node {left = ins l}
+      | x > y = balance node {right = ins r}
+      | otherwise = node {count = n + 1}
 
     balance :: RBNode a -> RBNode a
     balance (Node Black gv gc (Node Red pv pc (Node Red xv xc xl xr) pr) gr) =
@@ -116,254 +168,215 @@ insertRB x tree = makeBlack (ins tree)
       Node Red pv pc (Node Black gv gc gl pl) (Node Black xv xc pr xr)
     balance node = node
 ```
-Добавление элемента в дерево с последующей балансировкой.
-Если элемент уже присутствует, увеличивается его счётчик.
-Балансировка выполняется по стандартным правилам красно-чёрных деревьев:
-перекрашивание и повороты, обеспечивающие сохранение инвариантов.
 
-<br>
+**Удаление (`deleteRB`)**<br>
+Сначала проверяется счетчик элемента: если он > 1, то просто уменьшаем `count`. Если равен 1, запускается алгоритм удаления узла с перебалансировкой дерева для сохранения инвариантов красно-черного дерева. 
 
-`deleteRB x`
 ```haskell
 deleteRB :: (Ord a) => a -> RBNode a -> RBNode a
-deleteRB x tree = makeBlack (del tree)
+deleteRB _ Nil = Nil
+deleteRB x root =
+  case tryReduce x root of
+    Just newRoot -> newRoot
+    Nothing -> makeBlack (fst (deleteValue x root))
   where
-    makeBlack Nil = Nil
-    makeBlack (Node _ y count left right) = Node Black y count left right
+    tryReduce :: (Ord a) => a -> RBNode a -> Maybe (RBNode a)
+    tryReduce _ Nil = Just Nil
+    tryReduce val node@Node {value = v, left = l, right = r, count = c}
+      | val < v =
+          case tryReduce val l of
+            Just l' -> Just (node {left = l'})
+            Nothing -> Nothing
+      | val > v =
+          case tryReduce val r of
+            Just r' -> Just (node {right = r'})
+            Nothing -> Nothing
+      | otherwise =
+          if c > 1
+            then Just (node {count = c - 1})
+            else Nothing
 
-    del Nil = Nil
-    del node@(Node color y count left right)
-      | x < y = fixL (Node color y count (del left) right)
-      | x > y = fixR (Node color y count left (del right))
-      | count > 1 = Node color x (count - 1) left right
+    deleteValue :: (Ord a) => a -> RBNode a -> (RBNode a, Bool)
+    deleteValue _ Nil = (Nil, False)
+    deleteValue val node@Node {value = v, left = l, right = r}
+      | val < v =
+          let (l', shrunk) = deleteValue val l
+           in if shrunk then balanceLeft node {left = l'} else (node {left = l'}, False)
+      | val > v =
+          let (r', shrunk) = deleteValue val r
+           in if shrunk then balanceRight node {right = r'} else (node {right = r'}, False)
       | otherwise = removeNode node
 
-    fixL :: RBNode a -> RBNode a
-    fixL (Node color y count Nil right) = fixDoubleBlackL (Node color y count Nil right)
-    fixL (Node color y count left right) = Node color y count left right
-    fixL Nil = Nil
+    removeNode :: RBNode a -> (RBNode a, Bool)
+    removeNode Node {left = Nil, right = Nil, color = col} = (Nil, col == Black)
+    removeNode Node {left = child@Node {}, right = Nil, color = Black} = (makeBlack child, False)
+    removeNode Node {left = Nil, right = child@Node {}, color = Black} = (makeBlack child, False)
+    removeNode node@Node {right = r} =
+      let (minVal, minCount) = getMin r
+          (r', shrunk) = removeMin r
+          newNode = node {value = minVal, count = minCount, right = r'}
+       in if shrunk then balanceRight newNode else (newNode, False)
+    removeNode _ = (Nil, False)
 
-    fixR :: RBNode a -> RBNode a
-    fixR (Node color y count left Nil) = fixDoubleBlackR (Node color y count left Nil)
-    fixR (Node color y count left right) = Node color y count left right
-    fixR Nil = Nil
+    getMin :: RBNode a -> (a, Int)
+    getMin Node {left = Nil, value = v, count = c} = (v, c)
+    getMin Node {left = l} = getMin l
+    getMin Nil = error "unexpected Nil while getMin"
 
-    removeNode (Node Red _ _ left right) =
-      case (left, right) of
-        (Nil, Nil) -> Nil
-        _ -> fixR $ Node Red newValue newCount left newRight where (newValue, newCount, newRight) = deleteMin right
-    removeNode (Node Black _ _ left right) =
-      case (left, right) of
-        (Nil, Nil) -> Nil
-        (Nil, node) -> recolor node Black
-        (node, Nil) -> recolor node Black
-        _ -> Node Black newValue newCount left newRight where (newValue, newCount, newRight) = deleteMin right
-    removeNode Nil = Nil
+    removeMin :: RBNode a -> (RBNode a, Bool)
+    removeMin node@Node {left = Nil} = removeNode node
+    removeMin node@Node {left = l} =
+      let (l', shrunk) = removeMin l
+       in if shrunk then balanceLeft node {left = l'} else (node {left = l'}, False)
+    removeMin Nil = (Nil, False)
 
-    recolor :: RBNode a -> Color -> RBNode a
-    recolor Nil _ = Nil
-    recolor (Node _ x count left right) color = Node color x count left right
+    balanceLeft :: RBNode a -> (RBNode a, Bool)
+    balanceLeft node@Node {color = Black, right = sib@Node {color = Red, left = sl}} =
+      let (n', shrunk) = balanceLeft node {right = sl, color = Red}
+       in (sib {left = n', color = Black}, shrunk)
+    balanceLeft node@Node {color = col, right = sib@Node {color = Black, left = sl, right = sr}}
+      | isBlack sl && isBlack sr =
+          let newCol = case col of Red -> Black; Black -> Black
+           in (node {color = newCol, right = sib {color = Red}}, col == Black)
+      | isRed sl && isBlack sr =
+          let sib' = sib {color = Red, left = makeBlack sl}
+           in balanceLeft node {right = rotateRight sib'}
+      | otherwise =
+          (rotateLeft node {color = color sib, right = sib {color = col, right = makeBlack sr}}, False)
+    balanceLeft n = (n, False)
 
-    deleteMin :: RBNode a -> (a, Int, RBNode a)
-    deleteMin (Node color x count Nil right) = (x, count, recolor right color)
-    deleteMin (Node color x count left right) =
-      let (minVal, minCount, newLeft) = deleteMin left
-       in (minVal, minCount, Node color x count newLeft right)
-    deleteMin Nil = error "deleteMin on empty tree"
+    balanceRight :: RBNode a -> (RBNode a, Bool)
+    balanceRight node@Node {color = Black, left = sib@Node {color = Red, right = sr}} =
+      let (n', shrunk) = balanceRight node {left = sr, color = Red}
+       in (sib {right = n', color = Black}, shrunk)
+    balanceRight node@Node {color = col, left = sib@Node {color = Black, left = sl, right = sr}}
+      | isBlack sl && isBlack sr =
+          (node {color = Black, left = sib {color = Red}}, col == Black)
+      | isBlack sl && isRed sr =
+          let sib' = sib {color = Red, right = makeBlack sr}
+           in balanceRight node {left = rotateLeft sib'}
+      | otherwise =
+          (rotateRight node {color = color sib, left = sib {color = col, left = makeBlack sl}}, False)
+    balanceRight n = (n, False)
 
-    fixDoubleBlackL :: RBNode a -> RBNode a
-    fixDoubleBlackL (Node c gv gc (Node Red pv pc pl pr) gr) =
-      balanceDelL (Node Black pv pc (Node Red gv gc Nil pl) pr) gr
-    fixDoubleBlackL (Node c gv gc (Node Black pv pc pl pr) gr)
-      | isBlack pl && isBlack pr =
-          Node Black gv gc (Node Red pv pc pl pr) gr
-    fixDoubleBlackL (Node c gv gc (Node Black pv pc (Node Red cv cc cl cr) pr) gr) =
-      Node
-        Black
-        cv
-        cc
-        (Node Black gv gc Nil cl)
-        (Node Black pv pc cr pr)
-    fixDoubleBlackL (Node c gv gc (Node Black pv pc pl (Node Red cv cc cl cr)) gr) =
-      Node
-        Black
-        pv
-        pc
-        (Node Black gv gc Nil pl)
-        (Node Red cv cc cl cr)
-    fixDoubleBlackL t = recolor t Black
+    rotateLeft :: RBNode a -> RBNode a
+    rotateLeft node@Node {right = r@Node {left = b}} = r {left = node {right = b}}
+    rotateLeft t = t
 
-    fixDoubleBlackR :: RBNode a -> RBNode a
-    fixDoubleBlackR (Node c gv gc gl (Node Red pv pc pl pr)) =
-      balanceDelR (Node Black pv pc pl (Node Red gv gc pr Nil)) gl
-    fixDoubleBlackR (Node c gv gc gl (Node Black pv pc pl pr))
-      | isBlack pl && isBlack pr =
-          Node Black gv gc gl (Node Red pv pc pl pr)
-    fixDoubleBlackR (Node c gv gc gl (Node Black pv pc pl (Node Red cv cc cl cr))) =
-      Node
-        Black
-        cv
-        cc
-        (Node Black pv pc pl cl)
-        (Node Black gv gc cr Nil)
-    fixDoubleBlackR (Node c gv gc gl (Node Black pv pc (Node Red cv cc cl cr) pr)) =
-      Node
-        Black
-        pv
-        pc
-        (Node Red cv cc cl cr)
-        (Node Black gv gc pr Nil)
-    fixDoubleBlackR t = recolor t Black
-
-    balanceDelL :: RBNode a -> RBNode a -> RBNode a
-    balanceDelL (Node Black gv gc (Node Red pv pc (Node Red cv cc cl cr) s) gr) _ =
-      Node Red pv pc (Node Black cv cc cl cr) (Node Black gv gc s gr)
-    balanceDelL (Node Black gv gc (Node Red pv pc cl (Node Red cv cc cr s)) gr) _ =
-      Node Red cv cc (Node Black pv pc cl cr) (Node Black gv gc s gr)
-    balanceDelL node _ = node
-
-    balanceDelR :: RBNode a -> RBNode a -> RBNode a
-    balanceDelR (Node Black gv gc gl (Node Red pv pc s (Node Red cv cc cr gr))) _ =
-      Node Red pv pc (Node Black gv gc gl s) (Node Black cv cc cr gr)
-    balanceDelR (Node Black gv gc gl (Node Red pv pc (Node Red cv cc s cr) gr)) _ =
-      Node Red cv cc (Node Black gv gc gl s) (Node Black pv pc cr gr)
-    balanceDelR node _ = node
-
-    isBlack :: RBNode a -> Bool
-    isBlack Nil = True
-    isBlack (Node Black _ _ _ _) = True
-    isBlack _ = False
+    rotateRight :: RBNode a -> RBNode a
+    rotateRight node@Node {left = l@Node {right = b}} = l {right = node {left = b}}
+    rotateRight t = t
 ```
-Удаление элемента из дерева с сохранением его свойств.
-Если у элемента несколько копий, счётчик просто уменьшается.
-Иначе — выполняется корректирующая перестройка узлов, восстанавливающая балансировку.
-Включает обработку различных случаев, включая двойной черный узел.
 
-<br>
+**Объединение (`unionRB`)**<br>
+Объединение двух деревьев реализовано через свертку одного дерева с последовательной вставкой элементов в другое.
 
-`toList RBTree`
 ```haskell
-toList :: RBNode a -> [a]
-toList Nil = []
-toList (Node _ x count left right) = toList left ++ replicate count x ++ toList right
+unionRB :: (Ord a) => RBNode a -> RBNode a -> RBNode a
+unionRB Nil t = t
+unionRB t Nil = t
+unionRB t1 t2 = foldr insertRB t2 (toListRB t1)
 ```
-Рекурсивное преобразование дерева в отсортированный список с учётом кратности каждого элемента.
 
-<br>
+**Фильтрация (`filterRB`)**<br>
+Реализована через построение нового дерева, используя свёртку.
 
-`fromList list`
-```haskell
-fromList :: (Ord a) => [a] -> RBNode a
-fromList = foldr insertRB Nil
-```
-Создаёт сбалансированное дерево из списка элементов при помощи правой свёртки.
-Каждый элемент вставляется по одному с балансировкой, что обеспечивает корректную структуру.
-
-<br>
-
-`filterRB predicate RBTree`
 ```haskell
 filterRB :: (Ord a) => (a -> Bool) -> RBNode a -> RBNode a
-filterRB _ Nil = Nil
-filterRB p (Node color x count left right) = if p x then Node color x count newLeft newRight else newLeft <> newRight
+filterRB p root = foldr step Nil (toListRB root)
   where
-    newLeft = filterRB p left
-    newRight = filterRB p right
+    step x acc = if p x then insertRB x acc else acc
 ```
-Фильтрация элементов по предикату.
-Если элемент удовлетворяет условию, он сохраняется, иначе - исключается.
-Рекурсивно создаются новые поддеревья и объединяются с помощью <>.
 
+**Проверка валидности дерева**<br>
+Для тестов были реализованы функции проверки инвариантов КЧ-дерева:
+1. Корень черный.
+2. У красного узла нет красных детей.
+3. "Черная высота" одинакова на всех путях от корня к листьям.
 
-<br>
-
-`mapRB f RBTree`
 ```haskell
-mapRB :: (Ord a, Ord b) => (a -> b) -> RBNode a -> RBNode b
-mapRB _ Nil = Nil
-mapRB p (Node color x count left right) = Node color (p x) count newLeft newRight
-  where
-    newLeft = mapRB p left
-    newRight = mapRB p right
+validRBTree :: RBMultiSet a -> Bool
+validRBTree multiset = rootBlack tree && noRedChildrenForRed tree && isJust (blackPathCount tree)
+  where tree = getRBNode multiset
 ```
-Преобразует каждый элемент дерева функцией f.
-Результат строится рекурсивно в виде нового красно-чёрного дерева.
-
-<br>
-
-`foldlRB f init RBTree`
-```haskell
-foldlRB :: (a -> b -> a) -> a -> RBNode b -> a
-foldlRB _ acc Nil = acc
-foldlRB f acc (Node _ x count left right) = foldlRB f accNode right
-  where
-    accNode = iterate (`f` x) accLeft !! count
-    accLeft = foldlRB f acc left
-```
-Левая свёртка дерева — обходит его в порядке возрастания.
-Для каждого элемента применяет функцию f, обновляя аккумулятор.
-Учитывает кратность элементов (count) через повторное применение функции.
-
-<br>
-
-`foldrRB f init RBTree`
-```haskell
-foldrRB :: (a -> b -> b) -> b -> RBNode a -> b
-foldrRB _ acc Nil = acc
-foldrRB f acc (Node _ x count left right) = foldrRB f accNode left
-  where
-    accNode = iterate (f x) accRight !! count
-    accRight = foldrRB f acc right
-```
-Правая свёртка дерева — обходит его в порядке убывания.
-Для каждого элемента применяет функцию f, обновляя аккумулятор.
-Учитывает кратность элементов (count) через повторное применение функции.
-
 
 ## Тестирование
 
 ### Unit-тесты
+Проверяют базовую корректность API `MultiSet` и `RBMultiSet`.
 
-Проверяют корректность всех основных функций:
 ```haskell
 testCase "mempty tree toList is []" $
-  toList (mempty :: RBNode Int) @?= [],
+  toList (mempty :: RBMultiSet Int) @?= [],
+
+testCase "union (<>) combines elements" $
+  toList ((fromList [1, 2, 3] :: RBMultiSet Int) <> (fromList [4, 5, 3] :: RBMultiSet Int)) @?= [1, 2, 3, 3, 4, 5],
+
 testCase "insertRB and fromList" $
-  toList (fromList [3, 1, 2, 1 :: Int]) @?= [1, 1, 2, 3],
+  toList (fromList [3, 1, 2, 1] :: RBMultiSet Int) @?= [1, 1, 2, 3],
+
 testCase "deleteRB removes one occurrence" $
-  toList (deleteRB 2 (fromList [3, 1, 2, 1, 1 :: Int])) @?= [1, 1, 1, 3],
+  toList (delete 2 (fromList [3, 1, 2, 1, 1] :: RBMultiSet Int)) @?= [1, 1, 1, 3],
+
 testCase "deleteRB removes multiple occurrences" $
-  toList (deleteRB 1 (fromList [3, 1, 2, 1, 1 :: Int])) @?= [1, 1, 2, 3],
+  toList (delete 1 (fromList [3, 1, 2, 1, 1] :: RBMultiSet Int)) @?= [1, 1, 2, 3],
+
+testCase "deleteRB removes zero occurrences" $
+  toList (delete 4 (fromList [3, 1, 2, 1, 1] :: RBMultiSet Int)) @?= [1, 1, 1, 2, 3],
+
 testCase "filterRB keeps even elements" $
-  toList (filterRB even (fromList [1, 2, 3, 4, 5 :: Int])) @?= [2, 4],
+  toList (filter even (fromList [1, 2, 3, 4, 5] :: RBMultiSet Int)) @?= [2, 4],
+
 testCase "mapRB doubles elements" $
-  toList (mapRB (* 2) (fromList [1, 2, 3 :: Int])) @?= [2, 4, 6],
+  toList (map (* 2) (fromList [1, 2, 3] :: RBMultiSet Int)) @?= [2, 4, 6],
+
 testCase "foldlRB divides elements" $
-  foldlRB div 16 (fromList [1, 2, 4 :: Int]) @?= 2,
+  foldl div 16 (fromList [1, 2, 4] :: RBMultiSet Int) @?= 2,
+
 testCase "foldrRB sums elements" $
-  foldrRB (+) 0 (fromList [1, 2, 3, 4 :: Int]) @?= 10,
+  foldr (+) 1 (fromList [1, 2, 3, 4] :: RBMultiSet Int) @?= 11,
+
 testCase "Eq: same multiset (different order)" $
-  fromList [10, 5, 15, 3, 7, 3 :: Int] @=? fromList [5, 3, 7, 10, 15, 3],
+  (fromList [10, 5, 15, 3, 7, 3] :: RBMultiSet Int) @=? fromList [5, 3, 7, 10, 15, 3],
+
 testCase "Eq: different multisets" $
-  False @=? (fromList [1, 2 :: Int] == fromList [1, 1])
-``` 
+  False @=? ((fromList [1, 2] :: RBMultiSet Int) == fromList [1, 1])
+```
 
 ### Property-based тесты
-
-Проверяют свойства моноида (нейтральный элемент, ассоциативность) и корректность сравнения (Eq) относительно семантики мультимножества:
+Проверяют свойства моноида (нейтральный элемент, ассоциативность), корректность сравнения (Eq) относительно семантики мультимножества и сохранение инвариантов дерева при модификациях.
 
 ```haskell
 QC.testProperty "Monoid: left identity" $
-  \(xs :: [Int]) -> mempty <> fromList xs == (fromList xs :: RBNode Int),
+  \(xs :: [Int]) -> mempty <> fromList xs == (fromList xs :: RBMultiSet Int),
+
 QC.testProperty "Monoid: right identity" $
-  \(xs :: [Int]) -> fromList xs <> mempty == (fromList xs :: RBNode Int),
+  \(xs :: [Int]) -> fromList xs <> mempty == (fromList xs :: RBMultiSet Int),
+
 QC.testProperty "Monoid: associativity" $
   \(xs :: [Int]) (ys :: [Int]) (zs :: [Int]) ->
     let a = fromList xs; b = fromList ys; c = fromList zs
-      in (a <> b) <> c == (a <> (b <> c) :: RBNode Int),
+      in (a <> b) <> c == (a <> (b <> c) :: RBMultiSet Int),
+
 QC.testProperty "Eq consistent with sorted list equality" $
   \(xs :: [Int]) (ys :: [Int]) ->
-    (fromList xs == fromList ys) === (sort xs == sort ys)
+    ((fromList xs :: RBMultiSet Int) == fromList ys) === (sort xs == sort ys),
+
+QC.testProperty "RBTree: valid after fromList (insert)" $
+  \(xs :: [Int]) -> validRBTree (fromList xs :: RBMultiSet Int),
+
+QC.testProperty "RBTree: valid after delete" $
+  \(xs :: [Int]) (y :: Int) ->
+    let ms0 = fromList xs :: RBMultiSet Int
+        ms1 = insert y ms0
+        ms2 = delete y ms1
+      in validRBTree ms0 && validRBTree ms1 && validRBTree ms2,
+
+QC.testProperty "RBTree: valid after filter" $
+  \(xs :: [Int]) ->
+    let ms0 = fromList xs :: RBMultiSet Int
+        ms1 = filter even ms0
+      in validRBTree ms0 && validRBTree ms1
 ```
 
 ## Выводы
@@ -371,6 +384,3 @@ QC.testProperty "Eq consistent with sorted list equality" $
 В ходе работы была реализована собственная структура данных — красно-чёрное дерево для представления мультисета. Это позволило на практике применить полиморфизм, рекурсию и инкапсуляцию, а также освоить реализацию и использование экземпляров классов типа для задания обобщённого поведения.<br>
 Были применены различные приёмы функционального программирования: рекурсивный обход дерева, свёртки, отображения и фильтрация с сохранением балансировки.<br>
 Для проверки корректности реализации использованы как unit-тесты, так и property-based, что позволило убедиться в устойчивости и универсальности реализованных функций.
-
-
-
