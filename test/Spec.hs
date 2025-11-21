@@ -69,6 +69,12 @@ propertyTests =
           ((fromList xs :: RBMultiSet Int) == fromList ys) === (sort xs == sort ys),
       QC.testProperty "RBTree: valid after fromList" $
         \(xs :: [Int]) -> validRBTree (fromList xs :: RBMultiSet Int),
+      QC.testProperty "RBTree: valid after delete" $
+        \(xs :: [Int]) (y :: Int) ->
+          let ms0 = fromList xs :: RBMultiSet Int
+              ms1 = insert y ms0
+              ms2 = delete y ms1
+           in validRBTree ms0 && validRBTree ms1 && validRBTree ms2,
       QC.testProperty "RBTree: valid after filter" $
         \(xs :: [Int]) ->
           let ms0 = fromList xs :: RBMultiSet Int
