@@ -74,7 +74,7 @@ instance MultiSet RBMultiSet where
   empty = mempty
   insert x (RBMultiSet tree) = RBMultiSet (insertRB x tree)
   delete x (RBMultiSet tree) = RBMultiSet (deleteRB x tree)
-  map f (RBMultiSet tree) = RBMultiSet (fmap f tree)
+  map f (RBMultiSet tree) = fromList (toListRB (fmap f tree))
   filter p (RBMultiSet tree) = RBMultiSet (filterRB p tree)
   toList (RBMultiSet tree) = toListRB tree
   fromList xs = RBMultiSet (fromListRB xs)
