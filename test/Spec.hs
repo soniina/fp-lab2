@@ -79,5 +79,10 @@ propertyTests =
         \(xs :: [Int]) ->
           let ms0 = fromList xs :: RBMultiSet Int
               ms1 = filter even ms0
+           in validRBTree ms0 && validRBTree ms1,
+      QC.testProperty "RBTree: valid after map" $
+        \(xs :: [Int]) ->
+          let ms0 = fromList xs :: RBMultiSet Int
+              ms1 = map (10 -) ms0
            in validRBTree ms0 && validRBTree ms1
     ]
